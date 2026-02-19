@@ -148,3 +148,8 @@ add_subdirectory(audio2x-common)
 add_subdirectory(audio2emotion-sdk)
 add_subdirectory(audio2face-sdk)
 add_subdirectory(audio2x-sdk)
+
+option(BUILD_BRIDGE "Build the a2f_bridge C API shared library" OFF)
+if(BUILD_BRIDGE)
+  add_subdirectory(bridge)
+endif()

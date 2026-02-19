@@ -1,0 +1,140 @@
+name: Build a2f_bridge
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Linux build
+  # ---------------------------------------------------------------------------
+  build-linux:
+    runs-on: ubuntu-22.04
+    container:
+      image: nvidia/cuda:12.8.0-devel-ubuntu22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq cmake build-essential git curl python3
+
+      - name: Fetch SDK dependencies
+        run: |
+          chmod +x fetch_deps.sh
+          ./fetch_deps.sh release
+
+      - name: Configure CMake
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_BRIDGE=ON
+
+      - name: Build bridge
+        run: cmake --build build --target a2f_bridge --config Release -j$(nproc)
+
+      - name: Verify exported symbols
+        run: |
+          echo "=== Exported a2f_ symbols ==="
+          nm -D build/bridge/lib/liba2f_bridge.so | grep ' T a2f_' || true
+          echo "=== Symbol count ==="
+          nm -D build/bridge/lib/liba2f_bridge.so | grep -c ' T a2f_' || true
+
+      - name: Package artifacts
+        run: |
+          mkdir -p dist/linux-x64/lib dist/linux-x64/include
+          cp build/bridge/lib/liba2f_bridge.so dist/linux-x64/lib/
+          cp bridge/include/a2f_bridge.h dist/linux-x64/include/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a2f-bridge-linux-x64
+          path: dist/linux-x64/
+
+  # ---------------------------------------------------------------------------
+  # Windows build
+  # ---------------------------------------------------------------------------
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup CUDA Toolkit
+        uses: Jimver/cuda-toolkit@v0.2.21
+        with:
+          cuda: '12.8.0'
+          method: network
+          sub-packages: '["nvcc", "cudart", "cublas", "curand", "visual_studio_integration"]'
+
+      - name: Fetch SDK dependencies
+        shell: cmd
+        run: call fetch_deps.bat release
+
+      - name: Configure CMake
+        run: |
+          cmake -B build `
+            -DCMAKE_BUILD_TYPE=Release `
+            -DBUILD_BRIDGE=ON
+
+      - name: Build bridge
+        run: cmake --build build --target a2f_bridge --config Release
+
+      - name: Verify exported symbols
+        shell: cmd
+        run: |
+          echo === Exported a2f_ symbols ===
+          dumpbin /exports build\bridge\bin\Release\a2f_bridge.dll | findstr "a2f_" || dumpbin /exports build\bridge\bin\a2f_bridge.dll | findstr "a2f_"
+
+      - name: Package artifacts
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist/win-x64/lib, dist/win-x64/bin, dist/win-x64/include
+          $lib = Get-Item build/bridge/lib/Release/a2f_bridge.lib, build/bridge/lib/a2f_bridge.lib -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $lib) { throw "a2f_bridge.lib not found" }
+          Copy-Item $lib.FullName dist/win-x64/lib/
+          $dll = Get-Item build/bridge/bin/Release/a2f_bridge.dll, build/bridge/bin/a2f_bridge.dll -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $dll) { throw "a2f_bridge.dll not found" }
+          Copy-Item $dll.FullName dist/win-x64/bin/
+          Copy-Item bridge/include/a2f_bridge.h dist/win-x64/include/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: a2f-bridge-win-x64
+          path: dist/win-x64/
+
+  # ---------------------------------------------------------------------------
+  # Release (on tag push only)
+  # ---------------------------------------------------------------------------
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: a2f-bridge-linux-x64
+          path: a2f-bridge-linux-x64
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: a2f-bridge-win-x64
+          path: a2f-bridge-win-x64
+
+      - name: Create archives
+        run: |
+          tar czf a2f-bridge-linux-x64.tar.gz -C a2f-bridge-linux-x64 .
+          cd a2f-bridge-win-x64 && zip -r ../a2f-bridge-win-x64.zip . && cd ..
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            a2f-bridge-linux-x64.tar.gz
+            a2f-bridge-win-x64.zip
