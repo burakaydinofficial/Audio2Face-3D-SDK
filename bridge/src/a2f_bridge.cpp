@@ -10,6 +10,8 @@
 #include "audio2x/cuda_utils.h"
 #include "audio2x/tensor_float.h"
 
+#include <cuda_runtime_api.h>
+
 #include <algorithm>
 #include <cstring>
 #include <memory>

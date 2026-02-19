@@ -1,5 +1,6 @@
 __pycache__/
 /_build/
+/build/
 /_data/
 /_deps/
 /venv/

@@ -18,10 +18,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build tools
+      - name: Install system dependencies
         run: |
           apt-get update -qq
-          apt-get install -y -qq cmake build-essential git curl python3
+          apt-get install -y -qq build-essential git curl python3 \
+            libnvinfer-dev libnvinfer-plugin-dev libnvonnxparsers-dev
 
       - name: Fetch SDK dependencies
         run: |
@@ -30,12 +31,15 @@ jobs:
 
       - name: Configure CMake
         run: |
-          cmake -B build \
+          export PATH="$PWD/_deps/build-deps/ninja:$PATH"
+          _deps/build-deps/cmake/bin/cmake -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DBUILD_BRIDGE=ON
 
       - name: Build bridge
-        run: cmake --build build --target a2f_bridge --config Release -j$(nproc)
+        run: |
+          export PATH="$PWD/_deps/build-deps/ninja:$PATH"
+          _deps/build-deps/cmake/bin/cmake --build build --target a2f_bridge --config Release -j$(nproc)
 
       - name: Verify exported symbols
         run: |
@@ -74,14 +78,29 @@ jobs:
         shell: cmd
         run: call fetch_deps.bat release
 
-      - name: Configure CMake
+      - name: Install TensorRT
+        shell: pwsh
         run: |
-          cmake -B build `
+          pip install tensorrt==10.8.0.43
+          $trtPkg = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt').submodule_search_locations[0])"
+          $trtLibs = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt_libs').submodule_search_locations[0])"
+          echo "TENSORRT_INCLUDE=$trtPkg/include" >> $env:GITHUB_ENV
+          echo "TENSORRT_LIB=$trtLibs" >> $env:GITHUB_ENV
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\_deps\build-deps\ninja;$env:PATH"
+          & "$PWD\_deps\build-deps\cmake\bin\cmake.exe" -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
-            -DBUILD_BRIDGE=ON
+            -DBUILD_BRIDGE=ON `
+            -DTENSORRT_ROOT_DIR="$env:TENSORRT_LIB"
 
       - name: Build bridge
-        run: cmake --build build --target a2f_bridge --config Release
+        shell: pwsh
+        run: |
+          $env:PATH = "$PWD\_deps\build-deps\ninja;$env:PATH"
+          & "$PWD\_deps\build-deps\cmake\bin\cmake.exe" --build build --target a2f_bridge --config Release
 
       - name: Verify exported symbols
         shell: cmd
