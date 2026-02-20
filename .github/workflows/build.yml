@@ -75,7 +75,7 @@ jobs:
         with:
           cuda: '12.8.0'
           method: network
-          sub-packages: '["nvcc", "cudart", "cublas", "curand", "visual_studio_integration"]'
+          sub-packages: '["nvcc", "cudart", "cublas", "cublas_dev", "curand", "visual_studio_integration"]'
 
       - name: Fetch SDK dependencies
         shell: cmd
@@ -87,8 +87,23 @@ jobs:
           pip install tensorrt==10.8.0.43
           $trtPkg = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt').submodule_search_locations[0])"
           $trtLibs = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt_libs').submodule_search_locations[0])"
-          echo "TENSORRT_INCLUDE=$trtPkg/include" >> $env:GITHUB_ENV
-          echo "TENSORRT_LIB=$trtLibs" >> $env:GITHUB_ENV
+
+          # Stage into the directory layout FindTensorRT.cmake expects:
+          #   tensorrt-root/include/  (NvInfer.h etc. from tensorrt pip package)
+          #   tensorrt-root/lib/      (.lib + .dll from tensorrt_libs pip package)
+          $trtRoot = "$PWD\tensorrt-root"
+          New-Item -ItemType Directory -Force -Path "$trtRoot\include", "$trtRoot\lib"
+          Copy-Item "$trtPkg\include\*" "$trtRoot\include\" -Recurse
+          Copy-Item "$trtLibs\*" "$trtRoot\lib\" -Recurse
+
+          Write-Host "=== Staged TensorRT include ==="
+          Get-ChildItem "$trtRoot\include" -Filter "NvInfer*" | Select-Object Name
+          Write-Host "=== Staged TensorRT lib (.lib files) ==="
+          Get-ChildItem "$trtRoot\lib" -Filter "*.lib" | Select-Object Name
+          Write-Host "=== Staged TensorRT lib (.dll files) ==="
+          Get-ChildItem "$trtRoot\lib" -Filter "*.dll" | Select-Object Name
+
+          echo "TENSORRT_ROOT=$trtRoot" >> $env:GITHUB_ENV
 
       - name: Configure CMake
         shell: pwsh
@@ -97,7 +112,7 @@ jobs:
           & "$PWD\_deps\build-deps\cmake\bin\cmake.exe" -B build -G Ninja `
             -DCMAKE_BUILD_TYPE=Release `
             -DBUILD_BRIDGE=ON `
-            -DTENSORRT_ROOT_DIR="$env:TENSORRT_LIB"
+            -DTENSORRT_ROOT_DIR="$env:TENSORRT_ROOT"
 
       - name: Build bridge
         shell: pwsh
