@@ -81,27 +81,24 @@ jobs:
         shell: cmd
         run: call fetch_deps.bat release
 
-      - name: Install TensorRT
+      - name: Install TensorRT SDK
         shell: pwsh
         run: |
-          pip install tensorrt==10.8.0.43
-          $trtPkg = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt').submodule_search_locations[0])"
-          $trtLibs = python -c "import importlib.util; print(importlib.util.find_spec('tensorrt_libs').submodule_search_locations[0])"
+          # pip tensorrt does NOT include C++ headers on Windows (NVIDIA docs confirm this).
+          # Download the full SDK zip from NVIDIA CDN instead.
+          $trtUrl = "https://developer.download.nvidia.com/compute/machine-learning/tensorrt/10.7.0/zip/TensorRT-10.7.0.23.Windows.win10.cuda-12.6.zip"
+          Write-Host "Downloading TensorRT SDK from $trtUrl ..."
+          Invoke-WebRequest -Uri $trtUrl -OutFile tensorrt-sdk.zip -UseBasicParsing
 
-          # Stage into the directory layout FindTensorRT.cmake expects:
-          #   tensorrt-root/include/  (NvInfer.h etc. from tensorrt pip package)
-          #   tensorrt-root/lib/      (.lib + .dll from tensorrt_libs pip package)
-          $trtRoot = "$PWD\tensorrt-root"
-          New-Item -ItemType Directory -Force -Path "$trtRoot\include", "$trtRoot\lib"
-          Copy-Item "$trtPkg\include\*" "$trtRoot\include\" -Recurse
-          Copy-Item "$trtLibs\*" "$trtRoot\lib\" -Recurse
+          Write-Host "Extracting TensorRT SDK ..."
+          Expand-Archive tensorrt-sdk.zip -DestinationPath tensorrt-extract
+          $trtRoot = (Get-ChildItem tensorrt-extract -Directory | Select-Object -First 1).FullName
 
-          Write-Host "=== Staged TensorRT include ==="
+          Write-Host "=== TensorRT root: $trtRoot ==="
+          Write-Host "=== include ==="
           Get-ChildItem "$trtRoot\include" -Filter "NvInfer*" | Select-Object Name
-          Write-Host "=== Staged TensorRT lib (.lib files) ==="
+          Write-Host "=== lib ==="
           Get-ChildItem "$trtRoot\lib" -Filter "*.lib" | Select-Object Name
-          Write-Host "=== Staged TensorRT lib (.dll files) ==="
-          Get-ChildItem "$trtRoot\lib" -Filter "*.dll" | Select-Object Name
 
           echo "TENSORRT_ROOT=$trtRoot" >> $env:GITHUB_ENV
 
